@@ -1,0 +1,2 @@
+[target.x86_64-pc-windows-msvc]
+linker = "C:/src/chrome/src/third_party/llvm-build/Release+Asserts/bin/lld-link.exe"
