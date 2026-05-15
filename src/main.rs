@@ -1,3 +1,4 @@
+mod musiccast;
 mod win32;
 
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
@@ -34,6 +35,13 @@ fn main() {
         .unwrap();
 
     println!("Tray icon created successfully. Right-click the tray icon to exit.");
+
+    // Run Phase 2 discovery and status dump
+    if let Some(receiver) = musiccast::discover_receiver() {
+        musiccast::get_status(&receiver);
+    } else {
+        println!("Could not identify MusicCast receiver on the network.");
+    }
 
     win32::run_message_loop(|| {
         if let Ok(event) = MenuEvent::receiver().try_recv() {
