@@ -11,7 +11,9 @@ Phase 2:
 Phase 3:
 * Register as an extended controller via `YamahaExtendedControl` interface using : X-AppName: [YourAppName] and X-AppPort: [YourUDPPort]. http://{IP}/YamahaExtendedControl/v1/main/prepareEvent?device=udp&port={YOUR_PORT
 * Listen for broadcast events and dump the broadcast event to the console.
-* Every 10 minutes or if a suspend resume event is detected, re-register the endpoint (a few seconds after the suspend/resume event).
+* Every 10 minutes re-register the endpoint to prevent timeout.
+* If a suspend/resume occurs, wait a few seconds, then rerun receiver detection and registration.
+* TODO: Does the reciever broadcast a power off event that we can listen for as well?
 
 Phase 4:
 * Display a black rectangle in the lower right corner of the monitor showing the current volume (`actual_volume`) using the Consolas font with a 48pt size. Hide the display after 2 seconds of inactivity, or update it if the volume changes again during the 2 second window.
