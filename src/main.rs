@@ -1,8 +1,10 @@
 mod musiccast;
 mod win32;
 
+use std::net::UdpSocket;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, TrayIconBuilder, TrayIconEvent};
+use win32::Win32Event;
 
 fn load_icon(path: &std::path::Path) -> Icon {
     let file = std::fs::File::open(path).expect("Failed to open icon file");
@@ -14,7 +16,8 @@ fn load_icon(path: &std::path::Path) -> Icon {
         .next_frame(&mut buf)
         .expect("Failed to read PNG frame");
 
-    Icon::from_rgba(buf, info.width, info.height).expect("Failed to create tray icon from RGBA")
+    return Icon::from_rgba(buf, info.width, info.height)
+        .expect("Failed to create tray icon from RGBA");
 }
 
 fn main() {
@@ -36,18 +39,35 @@ fn main() {
 
     println!("Tray icon created successfully. Right-click the tray icon to exit.");
 
-    // Run Phase 2 discovery and status dump
-    if let Some(receiver) = musiccast::discover_receiver() {
-        musiccast::get_status(&receiver);
+    // Run Phase 2 discovery and start Phase 3 event listener. Exit early if discovery fails.
+    let app_port = if let Some(receiver) = musiccast::discover_receiver() {
+        let port = musiccast::start_event_listener(receiver);
+        if port == 0 {
+            println!("Exiting application due to port binding failure.");
+            return;
+        }
+        port
     } else {
-        println!("Could not identify MusicCast receiver on the network.");
-    }
+        println!("Could not identify MusicCast receiver on the network. Exiting application.");
+        return;
+    };
 
-    win32::run_message_loop(|| {
+    win32::run_message_loop(|win32_event| {
+        if win32_event == Win32Event::ResumeAutomatic {
+            println!("Win32 power resume detected. Sending synthetic WAKEUP packet...");
+            if let Ok(sock) = UdpSocket::bind("127.0.0.1:0") {
+                let _ = sock.send_to(musiccast::IPC_WAKEUP, format!("127.0.0.1:{}", app_port));
+            }
+        }
+
         if let Ok(event) = MenuEvent::receiver().try_recv() {
             println!("Menu event received: {:?}", event);
             if event.id == exit_item.id() {
                 println!("Exiting application...");
+                if let Ok(sock) = UdpSocket::bind("127.0.0.1:0") {
+                    let _ =
+                        sock.send_to(musiccast::IPC_SHUTDOWN, format!("127.0.0.1:{}", app_port));
+                }
                 return false;
             }
         }
