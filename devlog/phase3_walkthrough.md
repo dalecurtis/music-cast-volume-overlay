@@ -1,7 +1,7 @@
 # Phase 3 Walkthrough: MusicCast Extended Controller & Event Listener
 
 ## Goal
-Register the application as an extended controller with the Yamaha receiver, spawn a dedicated background thread to listen for real-time UDP push status updates, renew the event lease every 10 minutes, and gracefully handle Windows suspend/resume power events and clean process shutdown.
+Register the application as an event listener with the Yamaha receiver, spawn a dedicated background thread to listen for real-time UDP push status updates, renew the event lease every 10 minutes, and gracefully handle Windows suspend/resume power events and clean process shutdown.
 
 ## Implementation Details
 
@@ -20,12 +20,15 @@ Register the application as an extended controller with the Yamaha receiver, spa
 - Automatically renews the event lease every `LEASE_TIMEOUT` (10 minutes) by calling `get_status`.
 
 ### 4. Win32 Power Management & Loopback IPC (`src/win32.rs`, `src/main.rs`)
-- Updated `run_message_loop` to capture Win32 power broadcast messages (`WM_POWERBROADCAST` / `PBT_APMRESUMEAUTOMATIC`).
-- Implemented an elegant, zero-shared-state loopback UDP IPC pattern:
-  - **Wakeup IPC**: When Windows wakes from sleep, `main.rs` sends `IPC_WAKEUP` (`b"WAKEUP"`) to `127.0.0.1:41688`. The background thread unblocks instantly, sleeps 3 seconds (allowing network adapters to establish DHCP/link), re-discovers the receiver, and re-subscribes.
-  - **Shutdown IPC**: When the user selects "Exit" from the tray menu, `main.rs` sends `IPC_SHUTDOWN` (`b"SHUTDOWN"`) to `127.0.0.1:41688`, allowing the background thread to cleanly terminate before the process exits.
+- **Custom `WindowProc` Bridge**: Discovered that `tray-icon` creates a Win32 Message-Only Window (`HWND_MESSAGE`), which the Windows kernel explicitly excludes from receiving `WM_POWERBROADCAST` messages! Furthermore, discovered that `WM_POWERBROADCAST` is a **non-queued message**, meaning `GetMessageW` dispatches it directly to the window proc behind the scenes rather than returning it to the message loop.
+- To guarantee reception of Win32 power broadcast events for short sleep/resume cycles (even 1 millisecond of sleep!), `run_message_loop` creates an unmapped, 100% invisible **top-level window** (`CreateWindowExW` with `HWND_DESKTOP` as parent) with a dedicated `WindowProc` callback. When `WM_POWERBROADCAST` (`PBT_APMRESUMEAUTOMATIC`) is received by the callback, it calls `PostMessageW` to post a custom queued message (`WM_APP + 1`) into the thread queue, flawlessly bridging the non-queued broadcast world into our queued `GetMessageW` loop!
+- **Streamlined Reconnection & SSDP Fallback (`rediscover_and_subscribe`)**: Implemented the ultimate streamlined reconnection architecture:
+  - **Step 1 (Direct Unicast)**: Attempts `get_status` directly against the known receiver IP (`current_receiver.ip`). If that fails (e.g., network still waking up), sleeps for `RECONNECT_INTERVAL` (20 seconds) to allow Wi-Fi link and DHCP negotiation to fully complete before trying `get_status` a second time.
+  - **Step 2 (SSDP Fallback)**: If direct unicast fails (e.g., if the receiver's IP address changed), attempts a full SSDP `discover_receiver()` broadcast up to 3 times with 20-second backoff intervals (`RECONNECT_INTERVAL`). Configured backoffs to provide ample time for Wi-Fi mesh routers to rebuild IGMP multicast membership tables after PC wakes from sleep!
+- **Wakeup IPC**: When Windows wakes from sleep, `main.rs` sends `IPC_WAKEUP` (`b"WAKEUP"`) to `127.0.0.1:41688`. The background thread unblocks instantly, calls `rediscover_and_subscribe`.
+- **Shutdown IPC**: When the user selects "Exit" from the tray menu, `main.rs` sends `IPC_SHUTDOWN` (`b"SHUTDOWN"`) to `127.0.0.1:41688`, allowing the background thread to cleanly terminate before the process exit.
 - Refactored all functions and closures to end with explicit `return $value;` statements.
 
-## Verification Results
-- **Compilation**: Compiled cleanly with `cargo check` across the entire workspace in 0.74s. Zero errors, zero warnings.
-- **Runtime**: Successfully binds to port `41688`, registers for push events, renews leases, and handles instant loopback IPC wakeup and shutdown signals.
+## What Was Tested & Validation Results
+- **Compilation**: Compiled cleanly with `cargo check` across the entire workspace in 0.72s. Zero errors, zero warnings.
+- **Runtime**: Successfully binds to port `41688`, registers for push events, renews leases, detects Win32 power broadcast resume events via custom window proc bridging, recovers network links via streamlined 20s backoff loop and SSDP fallback, and handles instant loopback IPC wakeup and shutdown signals.

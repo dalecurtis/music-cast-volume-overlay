@@ -4,6 +4,9 @@ use std::time::{Duration, Instant};
 const MULTICAST_ADDR: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(239, 255, 255, 250), 1900);
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(3);
 
+// Value chosen arbitrarily, but seems to be about the time my PC takes to start using the network again.
+const RECONNECT_INTERVAL: Duration = Duration::from_secs(20);
+
 // MusicCast API requires us to renew our lease every 10 minutes to get updates.
 const LEASE_TIMEOUT: Duration = Duration::from_mins(10);
 const LISTENER_TIMEOUT: Duration = Duration::from_secs(LEASE_TIMEOUT.as_secs() / 2);
@@ -105,6 +108,44 @@ fn get_status(receiver: &MusicCastReceiver) -> bool {
     }
 }
 
+/// Attempts to renew with the current receiver first, then falls back to SSDP
+/// discovery if that fails.
+fn rediscover_and_subscribe(current_receiver: &mut MusicCastReceiver) -> bool {
+    // First see if the old address still works.
+    if get_status(current_receiver) {
+        println!("Successfully renewed with existing receiver endpoint");
+        return true;
+    }
+
+    println!(
+        "Waiting {}s for network to come up.",
+        RECONNECT_INTERVAL.as_secs()
+    );
+    std::thread::sleep(RECONNECT_INTERVAL);
+    if get_status(current_receiver) {
+        println!("Successfully renewed with existing receiver endpoint");
+        return true;
+    }
+
+    println!("Direct renewal failed. Attempting SSDP rediscovery...");
+
+    // Step 2: Retry SSDP discovery a few times.
+    for ssdp_retry in 1..=3 {
+        println!("Attempting SSDP rediscovery (attempt {}/6)...", ssdp_retry);
+        if let Some(new_receiver) = discover_receiver() {
+            *current_receiver = new_receiver;
+            if get_status(current_receiver) {
+                println!("Successfully rediscovered receiver via SSDP and renewed subscription.");
+                return true;
+            }
+        }
+        std::thread::sleep(RECONNECT_INTERVAL);
+    }
+
+    println!("Full SSDP fallback re-discovery failed.");
+    return false;
+}
+
 /// Spawns a dedicated background thread to listen for real-time MusicCast UDP broadcast events.
 /// Returns the bound local UDP port number for synthetic control messages.
 pub fn start_event_listener(initial_receiver: MusicCastReceiver) -> u16 {
@@ -137,19 +178,15 @@ pub fn start_event_listener(initial_receiver: MusicCastReceiver) -> u16 {
                     // Check if it's a synthetic IPC message from our main thread
                     if src_addr.ip().is_loopback() {
                         if &buf[..amt] == IPC_WAKEUP {
-                            println!(
-                                "Synthetic WAKEUP received. Waiting 3 seconds for network link/DHCP..."
-                            );
-                            std::thread::sleep(Duration::from_secs(3));
-
-                            if let Some(new_receiver) = discover_receiver() {
-                                current_receiver = new_receiver;
-                                get_status(&current_receiver);
+                            println!("Synthetic WAKEUP received.");
+                            if rediscover_and_subscribe(&mut current_receiver) {
                                 last_registration = Instant::now();
-                            } else {
-                                println!("Re-discovery failed after wakeup.");
+                                continue;
                             }
-                            continue;
+                            println!(
+                                "Failed to renew subscription or re-discover receiver. Shutting down."
+                            );
+                            break;
                         } else if &buf[..amt] == IPC_SHUTDOWN {
                             println!("Shutdown signal received. Stopping event listener thread...");
                             break;
@@ -171,10 +208,8 @@ pub fn start_event_listener(initial_receiver: MusicCastReceiver) -> u16 {
             }
 
             let now = Instant::now();
-
-            // Every 10 minutes (LEASE_TIMEOUT), re-register the endpoint to prevent lease timeout
             if now.duration_since(last_registration) >= LEASE_TIMEOUT {
-                println!("10-minute lease renewing...");
+                println!("Renewing MusicCast lease...");
                 if get_status(&current_receiver) {
                     last_registration = now;
                 }

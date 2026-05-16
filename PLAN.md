@@ -16,4 +16,4 @@ Phase 3:
 * TODO: Does the reciever broadcast a power off event that we can listen for as well?
 
 Phase 4:
-* Display a black rectangle in the lower right corner of the monitor showing the current volume (`actual_volume`) using the Consolas font with a 48pt size. Hide the display after 2 seconds of inactivity, or update it if the volume changes again during the 2 second window.
+* Display a black rectangle in the lower right corner of the monitor showing the current volume (`actual_volume`) using the Consolas font with a 48pt size and the unicode volume character 🔊. Hide the display after 2 seconds of inactivity, or update it if the volume changes again during the 2 second window.
