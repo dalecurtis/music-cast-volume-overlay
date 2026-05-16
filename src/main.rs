@@ -39,9 +39,12 @@ fn main() {
 
     println!("Tray icon created successfully. Right-click the tray icon to exit.");
 
-    // Run Phase 2 discovery and start Phase 3 event listener. Exit early if discovery fails.
+    // Create the unified Win32 layered popup window for power monitoring and volume overlay display.
+    let overlay_hwnd = win32::create_overlay_window();
+
+    // Run Phase 2 discovery and start Phase 3/4 event listener. Exit early if discovery fails.
     let app_port = if let Some(receiver) = musiccast::discover_receiver() {
-        let port = musiccast::start_event_listener(receiver);
+        let port = musiccast::start_event_listener(receiver, overlay_hwnd);
         if port == 0 {
             println!("Exiting application due to port binding failure.");
             return;
@@ -52,7 +55,7 @@ fn main() {
         return;
     };
 
-    win32::run_message_loop(|win32_event| {
+    win32::run_message_loop(overlay_hwnd, |win32_event| {
         if win32_event == Win32Event::ResumeAutomatic {
             println!("Win32 power resume detected. Sending synthetic WAKEUP packet...");
             if let Ok(sock) = UdpSocket::bind("127.0.0.1:0") {

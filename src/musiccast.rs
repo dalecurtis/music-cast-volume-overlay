@@ -1,15 +1,13 @@
+use serde::Deserialize;
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::time::{Duration, Instant};
+use windows_sys::Win32::Foundation::HWND;
 
 const MULTICAST_ADDR: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(239, 255, 255, 250), 1900);
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(3);
-
-// Value chosen arbitrarily, but seems to be about the time my PC takes to start using the network again.
-const RECONNECT_INTERVAL: Duration = Duration::from_secs(20);
-
-// MusicCast API requires us to renew our lease every 10 minutes to get updates.
 const LEASE_TIMEOUT: Duration = Duration::from_mins(10);
 const LISTENER_TIMEOUT: Duration = Duration::from_secs(LEASE_TIMEOUT.as_secs() / 2);
+const RECONNECT_INTERVAL: Duration = Duration::from_secs(20);
 
 // We use a fixed port instead of an ephemeral port (0.0.0.0:0) to ensure Windows Defender Firewall exception
 // prompt is generated. Otherwise packets coming back from the receiver will be dropped.
@@ -33,6 +31,26 @@ const MODEL_HEADER: &[u8] = b"X-ModelName: RX-A";
 #[derive(Clone, Debug)]
 pub struct MusicCastReceiver {
     pub ip: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct MusicCastEvent {
+    pub main: Option<MainZoneEvent>,
+}
+
+#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
+pub struct MainZoneEvent {
+    pub volume: Option<i32>,
+    pub actual_volume: Option<ActualVolume>,
+}
+
+#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
+pub struct ActualVolume {
+    pub mode: Option<String>,
+    pub value: Option<f64>,
+    pub unit: Option<String>,
 }
 
 /// Discovers a Yamaha MusicCast receiver on the local network using SSDP.
@@ -131,7 +149,7 @@ fn rediscover_and_subscribe(current_receiver: &mut MusicCastReceiver) -> bool {
 
     // Step 2: Retry SSDP discovery a few times.
     for ssdp_retry in 1..=3 {
-        println!("Attempting SSDP rediscovery (attempt {}/6)...", ssdp_retry);
+        println!("Attempting SSDP rediscovery (attempt {})...", ssdp_retry);
         if let Some(new_receiver) = discover_receiver() {
             *current_receiver = new_receiver;
             if get_status(current_receiver) {
@@ -148,7 +166,7 @@ fn rediscover_and_subscribe(current_receiver: &mut MusicCastReceiver) -> bool {
 
 /// Spawns a dedicated background thread to listen for real-time MusicCast UDP broadcast events.
 /// Returns the bound local UDP port number for synthetic control messages.
-pub fn start_event_listener(initial_receiver: MusicCastReceiver) -> u16 {
+pub fn start_event_listener(initial_receiver: MusicCastReceiver, overlay_hwnd: HWND) -> u16 {
     let socket = match UdpSocket::bind(("0.0.0.0", APP_UDP_PORT)) {
         Ok(s) => s,
         Err(e) => {
@@ -201,6 +219,17 @@ pub fn start_event_listener(initial_receiver: MusicCastReceiver) -> u16 {
                     );
                     println!("{}", event_str);
                     println!("--------------------------------------------------");
+
+                    if let Ok(event) = serde_json::from_str::<MusicCastEvent>(&event_str) {
+                        if let Some(main) = event.main {
+                            if let Some(actual) = main.actual_volume {
+                                if let Some(val) = actual.value {
+                                    println!("Parsed volume change: {:.1}dB", val);
+                                    crate::win32::post_volume_change(overlay_hwnd, val);
+                                }
+                            }
+                        }
+                    }
                 }
                 Err(_) => {
                     // Read timeout elapsed (every LISTENER_TIMEOUT)
