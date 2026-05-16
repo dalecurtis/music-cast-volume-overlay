@@ -21,7 +21,9 @@ fn load_icon_from_memory(bytes: &[u8]) -> Icon {
 
 fn main() {
     let menu = Menu::new();
+    let restart_item = MenuItem::new("Restart Listener", /*enabled=*/ true, None);
     let exit_item = MenuItem::new("Exit", /*enabled=*/ true, None);
+    let _ = menu.append(&restart_item);
     let _ = menu.append(&exit_item);
 
     // Bundle the PNG icon directly into the executable binary at compile time
@@ -35,7 +37,7 @@ fn main() {
         .build()
         .unwrap();
 
-    println!("Tray icon created successfully. Right-click the tray icon to exit.");
+    println!("Tray icon created successfully. Right-click the tray icon for options.");
 
     // Create the unified Win32 layered popup window for power monitoring and volume overlay display.
     let overlay_hwnd = win32::create_overlay_window();
@@ -70,7 +72,16 @@ fn main() {
                         sock.send_to(musiccast::IPC_SHUTDOWN, format!("127.0.0.1:{}", app_port));
                 }
                 return false;
+            } else if event.id == restart_item.id() {
+                println!("Restart Listener requested. Sending synthetic WAKEUP packet...");
+                if let Ok(sock) = UdpSocket::bind("127.0.0.1:0") {
+                    let _ = sock.send_to(musiccast::IPC_WAKEUP, format!("127.0.0.1:{}", app_port));
+                }
             }
+        }
+
+        if let Ok(event) = TrayIconEvent::receiver().try_recv() {
+            println!("Tray event received: {:?}", event);
         }
 
         return true;

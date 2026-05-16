@@ -201,8 +201,9 @@ pub fn start_event_listener(initial_receiver: MusicCastReceiver, overlay_hwnd: H
                                 last_registration = Instant::now();
                                 continue;
                             }
+                            // TODO: Add a full restart command if this happens frequently.
                             println!(
-                                "Failed to renew subscription or re-discover receiver. Shutting down."
+                                "Failed to renew subscription or re-discover receiver. Please exit the application."
                             );
                             break;
                         } else if &buf[..amt] == IPC_SHUTDOWN {
