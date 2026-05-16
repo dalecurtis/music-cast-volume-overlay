@@ -6,9 +6,8 @@ use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, TrayIconBuilder, TrayIconEvent};
 use win32::Win32Event;
 
-fn load_icon(path: &std::path::Path) -> Icon {
-    let file = std::fs::File::open(path).expect("Failed to open icon file");
-    let mut decoder = png::Decoder::new(std::io::BufReader::new(file));
+fn load_icon_from_memory(bytes: &[u8]) -> Icon {
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info().expect("Failed to read PNG info");
     let mut buf = vec![0; reader.output_buffer_size().unwrap()];
@@ -25,10 +24,9 @@ fn main() {
     let exit_item = MenuItem::new("Exit", /*enabled=*/ true, None);
     let _ = menu.append(&exit_item);
 
-    let icon = load_icon(std::path::Path::new(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/vol-icon-256x256.png"
-    )));
+    // Bundle the PNG icon directly into the executable binary at compile time
+    let icon_bytes = include_bytes!("../vol-icon-256x256.png");
+    let icon = load_icon_from_memory(icon_bytes);
 
     let _tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
@@ -73,10 +71,6 @@ fn main() {
                 }
                 return false;
             }
-        }
-
-        if let Ok(event) = TrayIconEvent::receiver().try_recv() {
-            println!("Tray event received: {:?}", event);
         }
 
         return true;
