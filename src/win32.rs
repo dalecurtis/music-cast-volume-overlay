@@ -4,6 +4,7 @@ use windows_sys::Win32::Graphics::Gdi::{
     DrawTextW, EndPaint, FW_NORMAL, FillRect, GetDeviceCaps, InvalidateRect, LOGPIXELSY,
     PAINTSTRUCT, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
 };
+use windows_sys::Win32::System::Console::FreeConsole;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, KillTimer,
@@ -21,6 +22,7 @@ pub enum Win32Event {
 
 const WM_APP_RESUMEAUTOMATIC: u32 = WM_APP + 1;
 const WM_APP_VOLUMECHANGE: u32 = WM_APP + 3;
+static mut CURRENT_VOLUME_TEXT: Option<String> = None;
 
 fn to_pcwstr(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -32,7 +34,6 @@ unsafe extern "system" fn window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    static mut CURRENT_VOLUME_TEXT: Option<String> = None;
     unsafe {
         if msg == WM_POWERBROADCAST && wparam == 0x0012 {
             // PBT_APMRESUMEAUTOMATIC is 0x0012
@@ -108,6 +109,13 @@ unsafe extern "system" fn window_proc(
         }
 
         return DefWindowProcW(hwnd, msg, wparam, lparam);
+    }
+}
+
+/// Detaches the process from its parent console window.
+pub fn free_console() {
+    unsafe {
+        FreeConsole();
     }
 }
 

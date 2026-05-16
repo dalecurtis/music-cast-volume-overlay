@@ -17,3 +17,6 @@ Phase 3:
 
 Phase 4:
 * Display a black rectangle in the lower right corner of the monitor showing the current volume (`actual_volume`) using the Consolas font with a 48pt size and the unicode volume character 🔊. Hide the display after 2 seconds of inactivity, or update it if the volume changes again during the 2 second window.
+
+Phase 5:
+* Add command line options to run without a console window.

@@ -20,6 +20,29 @@ fn load_icon_from_memory(bytes: &[u8]) -> Icon {
 }
 
 fn main() {
+    // Parse command-line arguments using zero-dependency std::env::args()
+    let mut args = std::env::args().skip(1);
+    let mut no_console = false;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--no-console" | "-n" => no_console = true,
+            "--help" | "-h" => {
+                println!("MusicCast Volume Overlay");
+                println!("Usage: music-cast-volume-overlay.exe [OPTIONS]");
+                println!("Options:");
+                println!("  -n, --no-console       Run in the background without a console window");
+                println!("  -h, --help             Print help information");
+                return;
+            }
+            _ => println!("Unknown argument: {}", arg),
+        }
+    }
+
+    if no_console {
+        win32::free_console();
+    }
+
     let menu = Menu::new();
     let restart_item = MenuItem::new("Restart Listener", /*enabled=*/ true, None);
     let exit_item = MenuItem::new("Exit", /*enabled=*/ true, None);
@@ -80,9 +103,8 @@ fn main() {
             }
         }
 
-        if let Ok(event) = TrayIconEvent::receiver().try_recv() {
-            println!("Tray event received: {:?}", event);
-        }
+        // Consume tray events without spamming the console
+        let _ = TrayIconEvent::receiver().try_recv();
 
         return true;
     });
